@@ -1,4 +1,12 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "countries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "totalTaps", "order": "DESCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
 
-type FirebasePublicConfig = {
+export type FirebasePublicConfig = {
   apiKey: string;
   authDomain: string;
   projectId: string;
@@ -38,30 +38,91 @@ function getMissingEnvKeys(config: FirebasePublicConfig): string[] {
 
 let firebaseApp: FirebaseApp | null = null;
 let firestoreDb: Firestore | null = null;
+let initPromise: Promise<Firestore> | null = null;
+let lastInitError: string | null = null;
 
-function getFirebaseApp(): FirebaseApp {
-  if (firebaseApp) return firebaseApp;
+async function loadFirebaseConfig(): Promise<FirebasePublicConfig> {
+  const localConfig = readFirebaseConfig();
+  const missingLocal = getMissingEnvKeys(localConfig);
+  if (missingLocal.length === 0) return localConfig;
 
-  const config = readFirebaseConfig();
-  const missing = getMissingEnvKeys(config);
-  if (missing.length > 0) {
+  const res = await fetch("/api/firebase-config");
+  const body = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const missing = Array.isArray(body.missing)
+      ? body.missing.join(", ")
+      : body.error ?? res.statusText;
+    throw new Error(`Firebase config unavailable: ${missing}`);
+  }
+
+  const missingRemote = getMissingEnvKeys(body);
+  if (missingRemote.length > 0) {
     throw new Error(
-      `Missing Firebase environment variables: ${missing.join(", ")}`
+      `Firebase config incomplete: ${missingRemote.join(", ")}`
     );
   }
 
-  firebaseApp = getApps().length ? getApp() : initializeApp(config);
-  return firebaseApp;
+  return body as FirebasePublicConfig;
+}
+
+function createFirebaseApp(config: FirebasePublicConfig): FirebaseApp {
+  return getApps().length ? getApp() : initializeApp(config);
+}
+
+export function getFirebaseStatus(): {
+  ready: boolean;
+  missing: string[];
+  error: string | null;
+} {
+  if (firestoreDb) {
+    return { ready: true, missing: [], error: null };
+  }
+
+  const missing = getMissingEnvKeys(readFirebaseConfig());
+  return {
+    ready: false,
+    missing,
+    error: lastInitError,
+  };
+}
+
+export function initDb(): Promise<Firestore> {
+  if (typeof window === "undefined") {
+    return Promise.reject(
+      new Error("Firestore is only available in the browser.")
+    );
+  }
+
+  if (firestoreDb) return Promise.resolve(firestoreDb);
+
+  if (!initPromise) {
+    initPromise = (async () => {
+      try {
+        const config = await loadFirebaseConfig();
+        firebaseApp = createFirebaseApp(config);
+        firestoreDb = getFirestore(firebaseApp);
+        lastInitError = null;
+        return firestoreDb;
+      } catch (error) {
+        lastInitError =
+          error instanceof Error ? error.message : "Firebase init failed";
+        initPromise = null;
+        throw error;
+      }
+    })();
+  }
+
+  return initPromise;
 }
 
 export function getDb(): Firestore {
-  if (typeof window === "undefined") {
-    throw new Error("Firestore is only available in the browser.");
-  }
-
   if (!firestoreDb) {
-    firestoreDb = getFirestore(getFirebaseApp());
+    throw new Error("Firebase not initialized. Call initDb() first.");
   }
-
   return firestoreDb;
+}
+
+export function isDbReady(): boolean {
+  return firestoreDb !== null;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   doc,
   onSnapshot,
@@ -10,7 +10,14 @@ import {
   orderBy,
   limit,
 } from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { initDb } from "@/lib/firebase";
+import {
+  getCountryByCode,
+  getCountryServerSnapshot,
+  getCountrySnapshot,
+  LEADERBOARD_LIMIT,
+  subscribeCountry,
+} from "@/lib/countries";
 import {
   formatNumber,
   getBadgeFraction,
@@ -21,12 +28,6 @@ import {
   getTranslations,
   subscribeNoop,
 } from "@/lib/i18n";
-
-type CountryInfo = {
-  code: string;
-  name: string;
-  flag: string;
-};
 
 type CountryRow = {
   id: string;
@@ -39,38 +40,6 @@ type CountryRow = {
 const ONLINE_BASE = 4281;
 const COUNTRIES_LIVE = 52;
 
-function getCountry(): CountryInfo {
-  if (typeof navigator === "undefined")
-    return { code: "US", name: "United States", flag: "🇺🇸" };
-
-  const lang = navigator.language.toLowerCase();
-  if (lang.includes("ja")) return { code: "JP", name: "Japan", flag: "🇯🇵" };
-  if (lang.includes("ko")) return { code: "KR", name: "Korea", flag: "🇰🇷" };
-  if (lang.includes("zh")) return { code: "CN", name: "China", flag: "🇨🇳" };
-  if (lang.includes("pt")) return { code: "BR", name: "Brazil", flag: "🇧🇷" };
-  if (lang.includes("es")) return { code: "ES", name: "Spain", flag: "🇪🇸" };
-  return { code: "US", name: "United States", flag: "🇺🇸" };
-}
-
-const DEFAULT_COUNTRY: CountryInfo = {
-  code: "US",
-  name: "United States",
-  flag: "🇺🇸",
-};
-
-let cachedCountry: CountryInfo | null = null;
-
-function getCountrySnapshot(): CountryInfo {
-  if (cachedCountry === null) {
-    cachedCountry = getCountry();
-  }
-  return cachedCountry;
-}
-
-function getCountryServerSnapshot(): CountryInfo {
-  return DEFAULT_COUNTRY;
-}
-
 function readStoredMyTaps(): number {
   if (typeof window === "undefined") return 0;
   return Number(localStorage.getItem("myTaps") || 0);
@@ -82,6 +51,43 @@ function readStoredRank(): number | null {
   return saved ? Number(saved) : null;
 }
 
+function getCountryCode(row: CountryRow): string {
+  return row.code ?? row.id;
+}
+
+function bumpCountryRow(
+  rows: CountryRow[],
+  countryCode: string,
+  flag: string,
+  name: string
+): CountryRow[] {
+  const idx = rows.findIndex((row) => getCountryCode(row) === countryCode);
+  let next: CountryRow[];
+
+  if (idx >= 0) {
+    next = rows.map((row, i) =>
+      i === idx
+        ? { ...row, totalTaps: Number(row.totalTaps || 0) + 1 }
+        : row
+    );
+  } else {
+    next = [
+      ...rows,
+      {
+        id: countryCode,
+        code: countryCode,
+        flag,
+        name,
+        totalTaps: 1,
+      },
+    ];
+  }
+
+  return next
+    .sort((a, b) => Number(b.totalTaps || 0) - Number(a.totalTaps || 0))
+    .slice(0, LEADERBOARD_LIMIT);
+}
+
 export default function Home() {
   const locale = useSyncExternalStore(
     subscribeNoop,
@@ -90,7 +96,7 @@ export default function Home() {
   );
   const t = useMemo(() => getTranslations(locale), [locale]);
   const country = useSyncExternalStore(
-    subscribeNoop,
+    subscribeCountry,
     getCountrySnapshot,
     getCountryServerSnapshot
   );
@@ -105,6 +111,9 @@ export default function Home() {
   const [countries, setCountries] = useState<CountryRow[]>([]);
   const [showPlus, setShowPlus] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [tapError, setTapError] = useState<string | null>(null);
+  const [firebaseReady, setFirebaseReady] = useState(false);
 
   const badgeLabel = useMemo(
     () => (rank ? getBadgeLabel(rank, t) : null),
@@ -118,7 +127,7 @@ export default function Home() {
 
   const countryRank = useMemo(() => {
     const idx = countries.findIndex(
-      (c) => c.id === country.code || c.code === country.code
+      (c) => getCountryCode(c) === country.code
     );
     return idx >= 0 ? idx + 1 : null;
   }, [countries, country.code]);
@@ -162,74 +171,145 @@ export default function Home() {
   }, [locale]);
 
   useEffect(() => {
-    const db = getDb();
-    const globalRef = doc(db, "counters", "global");
-    const unsubGlobal = onSnapshot(globalRef, (snap) => {
-      if (snap.exists()) setTotal(snap.data().totalTaps || 0);
-    });
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
 
-    const q = query(
-      collection(db, "countries"),
-      orderBy("totalTaps", "desc"),
-      limit(5)
-    );
-    const unsubCountries = onSnapshot(q, (snap) => {
-      setCountries(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    initDb()
+      .then((db) => {
+        if (cancelled) return;
+        setFirebaseReady(true);
+        setSyncError(null);
+
+        const globalRef = doc(db, "counters", "global");
+        unsubs.push(
+          onSnapshot(
+            globalRef,
+            (snap) => {
+              if (snap.exists()) setTotal(snap.data().totalTaps || 0);
+            },
+            (error) => {
+              setSyncError(`Global counter sync failed: ${error.message}`);
+            }
+          )
+        );
+
+        const q = query(
+          collection(db, "countries"),
+          orderBy("totalTaps", "desc"),
+          limit(LEADERBOARD_LIMIT)
+        );
+        unsubs.push(
+          onSnapshot(
+            q,
+            (snap) => {
+              setCountries(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+            },
+            (error) => {
+              setSyncError(`Country ranking sync failed: ${error.message}`);
+            }
+          )
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : "Firebase init failed";
+        setSyncError(message);
+        setFirebaseReady(false);
+      });
 
     return () => {
-      unsubGlobal();
-      unsubCountries();
+      cancelled = true;
+      unsubs.forEach((unsub) => unsub());
     };
   }, []);
 
-  const tap = async () => {
+  const tap = useCallback(async () => {
     setShowPlus(true);
     setTimeout(() => setShowPlus(false), 700);
+    setTapError(null);
 
-    const db = getDb();
-    const globalRef = doc(db, "counters", "global");
-    const countryRef = doc(db, "countries", country.code);
-    let newRank: number | null = null;
+    const prevTotal = total;
+    const prevMyTaps = myTaps;
+    const prevRank = rank;
+    const prevCountries = countries;
+    const nextTotal = total + 1;
+    const nextMyTaps = myTaps + 1;
+    const shouldClaimRank = !localStorage.getItem("humanRank");
+    const optimisticRank = shouldClaimRank ? nextTotal : rank;
 
-    await runTransaction(db, async (tx) => {
-      const globalSnap = await tx.get(globalRef);
-      const current = globalSnap.exists()
-        ? globalSnap.data().totalTaps || 0
-        : 0;
-      const nextTotal = current + 1;
-
-      if (!localStorage.getItem("humanRank")) {
-        newRank = nextTotal;
-      }
-
-      tx.set(globalRef, { totalTaps: nextTotal }, { merge: true });
-
-      const countrySnap = await tx.get(countryRef);
-      const countryCurrent = countrySnap.exists()
-        ? countrySnap.data().totalTaps || 0
-        : 0;
-      tx.set(
-        countryRef,
-        {
-          code: country.code,
-          name: localizedCountryName,
-          flag: country.flag,
-          totalTaps: countryCurrent + 1,
-        },
-        { merge: true }
-      );
-    });
-
-    const newMyTaps = myTaps + 1;
-    setMyTaps(newMyTaps);
-    localStorage.setItem("myTaps", String(newMyTaps));
-
-    if (newRank !== null) {
-      setRank(newRank);
-      localStorage.setItem("humanRank", String(newRank));
+    setTotal(nextTotal);
+    setMyTaps(nextMyTaps);
+    setCountries((rows) =>
+      bumpCountryRow(rows, country.code, country.flag, localizedCountryName)
+    );
+    if (shouldClaimRank && optimisticRank !== null) {
+      setRank(optimisticRank);
     }
-  };
+
+    try {
+      const db = await initDb();
+      const globalRef = doc(db, "counters", "global");
+      const countryRef = doc(db, "countries", country.code);
+      let newRank: number | null = null;
+
+      await runTransaction(db, async (tx) => {
+        const globalSnap = await tx.get(globalRef);
+        const current = globalSnap.exists()
+          ? globalSnap.data().totalTaps || 0
+          : 0;
+        const transactionTotal = current + 1;
+
+        if (shouldClaimRank) {
+          newRank = transactionTotal;
+        }
+
+        tx.set(
+          globalRef,
+          { totalTaps: transactionTotal },
+          { merge: true }
+        );
+
+        const countrySnap = await tx.get(countryRef);
+        const countryCurrent = countrySnap.exists()
+          ? countrySnap.data().totalTaps || 0
+          : 0;
+        tx.set(
+          countryRef,
+          {
+            code: country.code,
+            name: localizedCountryName,
+            flag: country.flag,
+            totalTaps: countryCurrent + 1,
+          },
+          { merge: true }
+        );
+      });
+
+      localStorage.setItem("myTaps", String(nextMyTaps));
+      if (newRank !== null) {
+        localStorage.setItem("humanRank", String(newRank));
+        setRank(newRank);
+      }
+      setSyncError(null);
+    } catch (error) {
+      setTotal(prevTotal);
+      setMyTaps(prevMyTaps);
+      setRank(prevRank);
+      setCountries(prevCountries);
+      const message =
+        error instanceof Error ? error.message : "Tap failed to save";
+      setTapError(message);
+    }
+  }, [
+    total,
+    myTaps,
+    rank,
+    countries,
+    country.code,
+    country.flag,
+    localizedCountryName,
+  ]);
 
   const shareNow = async () => {
     if (navigator.share) {
@@ -251,6 +331,8 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const activeError = tapError ?? syncError;
+
   return (
     <main className="app">
       <div className="app-bg" aria-hidden />
@@ -269,6 +351,12 @@ export default function Home() {
             </p>
           </header>
 
+          {activeError && (
+            <p className="firebase-error" role="alert">
+              {activeError}
+            </p>
+          )}
+
           <div className="counter-block">
             <p className="counter-label">{t.globalTaps}</p>
             <p className="counter-value">{formattedTotal}</p>
@@ -284,6 +372,9 @@ export default function Home() {
           <div className="live-stats">
             <span>{t.online(formatNumber(onlineNow, locale))}</span>
             <span>{t.countriesLive(COUNTRIES_LIVE)}</span>
+            {!firebaseReady && !activeError && (
+              <span className="live-stats-hint">Connecting…</span>
+            )}
           </div>
         </section>
 
@@ -306,7 +397,7 @@ export default function Home() {
             </p>
             <p className="card-hint">
               {country.flag} {localizedCountryName}
-              {!countryRank && rank ? t.outsideTop5 : ""}
+              {!countryRank && rank ? t.outsideRanking : ""}
               {!rank ? t.tapToCompete : ""}
             </p>
           </div>
@@ -340,7 +431,7 @@ export default function Home() {
           </div>
         </aside>
 
-        {/* ── RIGHT: leaderboard ── */}
+        {/* ── RIGHT: country ranking ── */}
         <aside className="col-right">
           <div className="glass-card leaderboard-card">
             <div className="card-shine" aria-hidden />
@@ -349,16 +440,26 @@ export default function Home() {
               <p className="card-hint center">{t.noDataYet}</p>
             ) : (
               <ol className="leaderboard">
-                {countries.map((c, i) => (
-                  <li key={c.id} className="lb-row">
-                    <span className="lb-num">{i + 1}</span>
-                    <span className="lb-flag">{c.flag}</span>
-                    <span className="lb-country">{c.name}</span>
-                    <span className="lb-taps">
-                      {formatNumber(Number(c.totalTaps || 0), locale)}
-                    </span>
-                  </li>
-                ))}
+                {countries.map((c, i) => {
+                  const code = getCountryCode(c);
+                  const info = getCountryByCode(code);
+                  const isYou = code === country.code;
+                  return (
+                    <li
+                      key={c.id}
+                      className={`lb-row${isYou ? " lb-row-you" : ""}`}
+                    >
+                      <span className="lb-num">{i + 1}</span>
+                      <span className="lb-flag">{c.flag ?? info.flag}</span>
+                      <span className="lb-country">
+                        {getLocalizedCountryName(code, t)}
+                      </span>
+                      <span className="lb-taps">
+                        {formatNumber(Number(c.totalTaps || 0), locale)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </div>
