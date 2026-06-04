@@ -21,13 +21,17 @@ import {
 import {
   formatNumber,
   getBadgeFraction,
-  getBadgeLabel,
   getLocaleServerSnapshot,
   getLocaleSnapshot,
   getLocalizedCountryName,
   getTranslations,
   subscribeNoop,
 } from "@/lib/i18n";
+import {
+  buildShareCardMessage,
+  getSeniorityBadge,
+  readJoinTapNumber,
+} from "@/lib/seniority";
 
 type CountryRow = {
   id: string;
@@ -106,7 +110,9 @@ export default function Home() {
   );
 
   const [total, setTotal] = useState(0);
-  const [rank, setRank] = useState<number | null>(readStoredRank);
+  const [rank, setRank] = useState<number | null>(() =>
+    readStoredRank() ?? readJoinTapNumber()
+  );
   const [myTaps, setMyTaps] = useState(readStoredMyTaps);
   const [countries, setCountries] = useState<CountryRow[]>([]);
   const [showPlus, setShowPlus] = useState(false);
@@ -115,9 +121,9 @@ export default function Home() {
   const [tapError, setTapError] = useState<string | null>(null);
   const [firebaseReady, setFirebaseReady] = useState(false);
 
-  const badgeLabel = useMemo(
-    () => (rank ? getBadgeLabel(rank, t) : null),
-    [rank, t]
+  const seniorityBadge = useMemo(
+    () => (rank ? getSeniorityBadge(rank) : null),
+    [rank]
   );
 
   const badgeFraction = useMemo(
@@ -143,28 +149,9 @@ export default function Home() {
   );
 
   const shareBody = useMemo(() => {
-    let text = `${t.shareMessageIntro(formattedTotal)}\n\n${t.shareQuestion}`;
-    if (rank) {
-      text = `${t.shareMessageIntro(formattedTotal)}\n\n${t.shareGlobalRank(formatNumber(rank, locale))}`;
-      if (badgeLabel) {
-        text += `\n${t.shareBadge(badgeLabel, badgeFraction)}`;
-      }
-      if (countryRank) {
-        text += `\n${t.shareCountryRank(countryRank, localizedCountryName)}`;
-      }
-      text += `\n\n${t.shareQuestion}`;
-    }
-    return text;
-  }, [
-    t,
-    formattedTotal,
-    rank,
-    badgeLabel,
-    badgeFraction,
-    countryRank,
-    localizedCountryName,
-    locale,
-  ]);
+    if (!rank) return "";
+    return buildShareCardMessage(Number(rank));
+  }, [rank]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -290,6 +277,7 @@ export default function Home() {
       localStorage.setItem("myTaps", String(nextMyTaps));
       if (newRank !== null) {
         localStorage.setItem("humanRank", String(newRank));
+        localStorage.setItem("joinTapNumber", String(newRank));
         setRank(newRank);
       }
       setSyncError(null);
@@ -406,14 +394,16 @@ export default function Home() {
           <div className={`glass-card founder-card ${rank && rank <= 10000 ? "founder-active" : ""}`}>
             <div className="card-shine gold-shine" aria-hidden />
             <h2 className="card-label">{t.founderBadge}</h2>
-            {rank && rank <= 10000 ? (
+            {rank ? (
               <div className="founder-medal">
                 <div className="founder-seal">★</div>
                 <div>
-                  <p className="founder-tier">{badgeLabel}</p>
+                  <p className="founder-tier">{seniorityBadge}</p>
                   <p className="founder-stat">
                     #{formatNumber(rank, locale)}
-                    <span className="founder-of">{badgeFraction}</span>
+                    {rank <= 10000 ? (
+                      <span className="founder-of">{badgeFraction}</span>
+                    ) : null}
                   </p>
                 </div>
               </div>
@@ -466,45 +456,30 @@ export default function Home() {
           </div>
         </aside>
 
-        {/* ── SHARE PROOF ── */}
-        <section className="share-card">
-          <div className="share-glow" aria-hidden />
-          <p className="share-lead">
-            {t.shareJoined} <strong>{t.shareProjectName}</strong>
-          </p>
-          <p className="share-body">
-            {t.shareWhenBefore}
-            <strong className="share-count">{formattedTotal}</strong>
-            {t.shareWhenAfter}
-          </p>
-          <p className="share-question">{t.shareQuestion}</p>
-          <div className="share-proof-row">
-            <div className="proof-chip">
-              <span>{t.proofGlobalRank}</span>
-              <b>{rank ? `#${formatNumber(rank, locale)}` : "—"}</b>
+        {/* ── SHARE PROOF (after first tap) ── */}
+        {myTaps > 0 && rank !== null && (
+          <section className="share-card">
+            <div className="share-glow" aria-hidden />
+            <p className="share-lead">
+              I joined <strong>ONE TRILLION</strong> when there were only{" "}
+              <strong className="share-count">
+                {formatNumber(rank, locale)}
+              </strong>{" "}
+              taps.
+            </p>
+            <p className="share-question">
+              Can humanity reach 1,000,000,000,000?
+            </p>
+            <div className="share-btns">
+              <button type="button" onClick={shareNow} className="btn-share">
+                {t.shareNow}
+              </button>
+              <button type="button" onClick={copyLink} className="btn-copy">
+                {copied ? t.copied : t.copyLink}
+              </button>
             </div>
-            <div className="proof-chip">
-              <span>{t.proofCountryRank}</span>
-              <b>{countryRank ? `#${countryRank}` : "—"}</b>
-            </div>
-            <div className="proof-chip">
-              <span>{t.proofFounderBadge}</span>
-              <b>{rank && rank <= 10000 ? badgeLabel : "—"}</b>
-            </div>
-            <div className="proof-chip">
-              <span>{t.proofGlobalTaps}</span>
-              <b>{formattedTotal}</b>
-            </div>
-          </div>
-          <div className="share-btns">
-            <button type="button" onClick={shareNow} className="btn-share">
-              {t.shareNow}
-            </button>
-            <button type="button" onClick={copyLink} className="btn-copy">
-              {copied ? t.copied : t.copyLink}
-            </button>
-          </div>
-        </section>
+          </section>
+        )}
       </div>
     </main>
   );
