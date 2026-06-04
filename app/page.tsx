@@ -255,6 +255,8 @@ export default function Home() {
 
       await runTransaction(db, async (tx) => {
         const globalSnap = await tx.get(globalRef);
+        const countrySnap = await tx.get(countryRef);
+
         const current = globalSnap.exists()
           ? globalSnap.data().totalTaps || 0
           : 0;
@@ -264,16 +266,15 @@ export default function Home() {
           newRank = transactionTotal;
         }
 
+        const countryCurrent = countrySnap.exists()
+          ? countrySnap.data().totalTaps || 0
+          : 0;
+
         tx.set(
           globalRef,
           { totalTaps: transactionTotal },
           { merge: true }
         );
-
-        const countrySnap = await tx.get(countryRef);
-        const countryCurrent = countrySnap.exists()
-          ? countrySnap.data().totalTaps || 0
-          : 0;
         tx.set(
           countryRef,
           {
