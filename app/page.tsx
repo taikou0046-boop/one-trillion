@@ -32,6 +32,14 @@ import {
   getSeniorityBadge,
   readJoinTapNumber,
 } from "@/lib/seniority";
+import {
+  DAILY_MISSION_GOALS,
+  DAILY_MISSION_MAX,
+  getDailyTaps,
+  getMsUntilMidnight,
+  isMissionComplete,
+  saveDailyTaps,
+} from "@/lib/dailyMission";
 
 type CountryRow = {
   id: string;
@@ -114,6 +122,7 @@ export default function Home() {
     readStoredRank() ?? readJoinTapNumber()
   );
   const [myTaps, setMyTaps] = useState(readStoredMyTaps);
+  const [dailyTaps, setDailyTaps] = useState(getDailyTaps);
   const [countries, setCountries] = useState<CountryRow[]>([]);
   const [showPlus, setShowPlus] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -156,6 +165,32 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+
+    const scheduleMidnightReset = () => {
+      timer = setTimeout(() => {
+        saveDailyTaps(0);
+        setDailyTaps(0);
+        scheduleMidnightReset();
+      }, getMsUntilMidnight());
+    };
+
+    scheduleMidnightReset();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setDailyTaps(getDailyTaps());
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +251,8 @@ export default function Home() {
     setTimeout(() => setShowPlus(false), 700);
     setTapError(null);
 
+    const prevDailyTaps = dailyTaps;
+    const nextDailyTaps = dailyTaps + 1;
     const prevTotal = total;
     const prevMyTaps = myTaps;
     const prevRank = rank;
@@ -227,6 +264,7 @@ export default function Home() {
 
     setTotal(nextTotal);
     setMyTaps(nextMyTaps);
+    setDailyTaps(nextDailyTaps);
     setCountries((rows) =>
       bumpCountryRow(rows, country.code, country.flag, localizedCountryName)
     );
@@ -275,6 +313,7 @@ export default function Home() {
       });
 
       localStorage.setItem("myTaps", String(nextMyTaps));
+      saveDailyTaps(nextDailyTaps);
       if (newRank !== null) {
         localStorage.setItem("humanRank", String(newRank));
         localStorage.setItem("joinTapNumber", String(newRank));
@@ -284,6 +323,7 @@ export default function Home() {
     } catch (error) {
       setTotal(prevTotal);
       setMyTaps(prevMyTaps);
+      setDailyTaps(prevDailyTaps);
       setRank(prevRank);
       setCountries(prevCountries);
       const message =
@@ -293,6 +333,7 @@ export default function Home() {
   }, [
     total,
     myTaps,
+    dailyTaps,
     rank,
     countries,
     country.code,
@@ -372,10 +413,23 @@ export default function Home() {
           <div className="glass-card">
             <div className="card-shine" aria-hidden />
             <h2 className="card-label">{t.yourGlobalRank}</h2>
-            <p className="card-stat blue-glow">
-              {rank ? `#${formatNumber(rank, locale)}` : "—"}
-            </p>
-            {!rank && <p className="card-hint">{t.tapToClaimRank}</p>}
+            {rank ? (
+              <>
+                <p className="card-stat blue-glow world-rank-stat">
+                  {t.worldRankPosition(formatNumber(rank, locale))}
+                </p>
+                {rank > 1 && (
+                  <p className="card-hint rank-next-hint">
+                    {t.worldRankNext(1, formatNumber(rank - 1, locale))}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="card-stat blue-glow">—</p>
+                <p className="card-hint">{t.tapToClaimRank}</p>
+              </>
+            )}
           </div>
 
           <div className="glass-card">
@@ -420,13 +474,40 @@ export default function Home() {
             <h2 className="card-label">{t.yourTaps}</h2>
             <p className="card-stat blue-glow">{formatNumber(myTaps, locale)}</p>
           </div>
+
+          <div className="glass-card mission-card">
+            <div className="card-shine" aria-hidden />
+            <h2 className="card-label">{t.dailyMission}</h2>
+            <ul className="mission-list">
+              {DAILY_MISSION_GOALS.map((goal) => {
+                const done = isMissionComplete(dailyTaps, goal);
+                return (
+                  <li
+                    key={goal}
+                    className={`mission-row${done ? " mission-row-done" : ""}`}
+                  >
+                    <span>{t.dailyGoal(goal)}</span>
+                    {done && (
+                      <span className="mission-complete">{t.missionComplete}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mission-progress">
+              {t.dailyProgress(
+                formatNumber(dailyTaps, locale),
+                formatNumber(DAILY_MISSION_MAX, locale)
+              )}
+            </p>
+          </div>
         </aside>
 
         {/* ── RIGHT: country ranking ── */}
         <aside className="col-right">
           <div className="glass-card leaderboard-card">
             <div className="card-shine" aria-hidden />
-            <h2 className="card-label">{t.countryRanking}</h2>
+            <h2 className="card-label">{t.countryRankingTop10}</h2>
             {countries.length === 0 ? (
               <p className="card-hint center">{t.noDataYet}</p>
             ) : (

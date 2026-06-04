@@ -31,7 +31,14 @@ export type Translations = {
   badgeChallenger: string;
   joinEarlyToUnlock: string;
   yourTaps: string;
+  dailyMission: string;
+  dailyGoal: (count: number) => string;
+  dailyProgress: (current: string, max: string) => string;
+  missionComplete: string;
+  worldRankPosition: (rank: string) => string;
+  worldRankNext: (count: number, nextRank: string) => string;
   countryRanking: string;
+  countryRankingTop10: string;
   noDataYet: string;
   shareJoined: string;
   shareProjectName: string;
@@ -87,7 +94,15 @@ const en: Translations = {
   badgeChallenger: "Challenger",
   joinEarlyToUnlock: "Join early to unlock",
   yourTaps: "YOUR TAPS",
+  dailyMission: "DAILY MISSION",
+  dailyGoal: (count) => `· Tap ${count} times today`,
+  dailyProgress: (current, max) => `${current} / ${max}`,
+  missionComplete: "COMPLETE",
+  worldRankPosition: (rank) => `World #${rank}`,
+  worldRankNext: (count, nextRank) =>
+    `${count} more tap${count === 1 ? "" : "s"} to #${nextRank}`,
   countryRanking: "🏆 Country Ranking",
+  countryRankingTop10: "🏆 Country Ranking TOP10",
   noDataYet: "No data yet — tap to start.",
   shareJoined: "I joined",
   shareProjectName: "THE TRILLION PROJECT",
@@ -147,7 +162,14 @@ const ja: Translations = {
   badgeChallenger: "チャレンジャー",
   joinEarlyToUnlock: "早めに参加して解除",
   yourTaps: "あなたのタップ数",
+  dailyMission: "DAILY MISSION",
+  dailyGoal: (count) => `・今日${count}回TAP`,
+  dailyProgress: (current, max) => `${current} / ${max}`,
+  missionComplete: "COMPLETE",
+  worldRankPosition: (rank) => `世界 #${rank} 位`,
+  worldRankNext: (count, nextRank) => `あと${count}回で #${nextRank} 位`,
   countryRanking: "🏆 国別ランキング",
+  countryRankingTop10: "🏆 国別ランキング TOP10",
   noDataYet: "データなし — タップして開始。",
   shareJoined: "参加しました",
   shareProjectName: "ザ・トリリオンプロジェクト",
