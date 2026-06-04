@@ -25,10 +25,16 @@ export type Translations = {
   outsideRanking: string;
   tapToCompete: string;
   founderBadge: string;
+  badgeLegendFounder: string;
   badgeFounder: string;
   badgePioneer: string;
   badgeEarlyMember: string;
   badgeChallenger: string;
+  invitedFriends: string;
+  invitedFriendsCount: (count: string) => string;
+  japanVsWorld: string;
+  japanLabel: string;
+  worldLabel: string;
   joinEarlyToUnlock: string;
   yourTaps: string;
   dailyMission: string;
@@ -88,11 +94,17 @@ const en: Translations = {
   outsideRanking: " · outside ranking",
   tapToCompete: " · tap to compete",
   founderBadge: "Founder Badge",
+  badgeLegendFounder: "Legend Founder",
   badgeFounder: "Founder",
   badgePioneer: "Pioneer",
   badgeEarlyMember: "Early Member",
   badgeChallenger: "Challenger",
   joinEarlyToUnlock: "Join early to unlock",
+  invitedFriends: "INVITED FRIENDS",
+  invitedFriendsCount: (count) => `${count}`,
+  japanVsWorld: "JAPAN vs WORLD",
+  japanLabel: "🇯🇵 JAPAN",
+  worldLabel: "🌎 WORLD",
   yourTaps: "YOUR TAPS",
   dailyMission: "DAILY MISSION",
   dailyGoal: (count) => `· Tap ${count} times today`,
@@ -156,11 +168,17 @@ const ja: Translations = {
   outsideRanking: " · ランキング圏外",
   tapToCompete: " · タップして参加",
   founderBadge: "創設者バッジ",
+  badgeLegendFounder: "レジェンド創設者",
   badgeFounder: "創設者",
   badgePioneer: "開拓者",
   badgeEarlyMember: "アーリーメンバー",
   badgeChallenger: "チャレンジャー",
   joinEarlyToUnlock: "早めに参加して解除",
+  invitedFriends: "INVITED FRIENDS",
+  invitedFriendsCount: (count) => `${count}人`,
+  japanVsWorld: "JAPAN vs WORLD",
+  japanLabel: "🇯🇵 JAPAN",
+  worldLabel: "🌎 WORLD",
   yourTaps: "あなたのタップ数",
   dailyMission: "DAILY MISSION",
   dailyGoal: (count) => `・今日${count}回TAP`,
@@ -647,6 +665,7 @@ export function getBadgeLabel(
   rank: number,
   t: Translations
 ): string {
+  if (rank <= 10) return t.badgeLegendFounder;
   if (rank <= 100) return t.badgeFounder;
   if (rank <= 1000) return t.badgePioneer;
   if (rank <= 10000) return t.badgeEarlyMember;
@@ -654,6 +673,7 @@ export function getBadgeLabel(
 }
 
 export function getBadgeFraction(rank: number): string {
+  if (rank <= 10) return " / 10";
   if (rank <= 100) return " / 100";
   if (rank <= 1000) return " / 1,000";
   if (rank <= 10000) return " / 10,000";

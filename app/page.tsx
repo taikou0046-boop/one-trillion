@@ -30,8 +30,15 @@ import {
 import {
   buildShareCardMessage,
   getSeniorityBadge,
+  isLegendFounder,
   readJoinTapNumber,
 } from "@/lib/seniority";
+import {
+  buildShareUrl,
+  creditInviteOnTap,
+  getInvitedFriendsCount,
+  parseAndStoreInviteFromUrl,
+} from "@/lib/invite";
 import {
   DAILY_MISSION_GOALS,
   DAILY_MISSION_MAX,
@@ -129,6 +136,9 @@ export default function Home() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [tapError, setTapError] = useState<string | null>(null);
   const [firebaseReady, setFirebaseReady] = useState(false);
+  const [invitedFriends, setInvitedFriends] = useState(() =>
+    getInvitedFriendsCount(readJoinTapNumber() ?? readStoredRank())
+  );
 
   const seniorityBadge = useMemo(
     () => (rank ? getSeniorityBadge(rank) : null),
@@ -146,6 +156,16 @@ export default function Home() {
     );
     return idx >= 0 ? idx + 1 : null;
   }, [countries, country.code]);
+
+  const japanTaps = useMemo(() => {
+    const jp = countries.find((c) => getCountryCode(c) === "JP");
+    return Number(jp?.totalTaps || 0);
+  }, [countries]);
+
+  const japanShare = useMemo(() => {
+    if (total <= 0) return 50;
+    return Math.min(100, Math.max(0, (japanTaps / total) * 100));
+  }, [japanTaps, total]);
 
   const onlineNow = useMemo(
     () => ONLINE_BASE + Math.floor(total / 137),
@@ -165,6 +185,20 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+
+  useEffect(() => {
+    parseAndStoreInviteFromUrl();
+  }, []);
+
+  useEffect(() => {
+    const onStorage = () => {
+      setInvitedFriends(
+        getInvitedFriendsCount(readJoinTapNumber() ?? readStoredRank())
+      );
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -319,6 +353,8 @@ export default function Home() {
         localStorage.setItem("joinTapNumber", String(newRank));
         setRank(newRank);
       }
+      creditInviteOnTap();
+      setInvitedFriends(getInvitedFriendsCount(newRank ?? rank));
       setSyncError(null);
     } catch (error) {
       setTotal(prevTotal);
@@ -341,22 +377,31 @@ export default function Home() {
     localizedCountryName,
   ]);
 
+  const shareUrl = useMemo(
+    () => (rank ? buildShareUrl(rank) : ""),
+    [rank]
+  );
+
   const shareNow = async () => {
     if (navigator.share) {
       await navigator.share({
         title: t.shareTitle,
         text: shareBody,
-        url: window.location.href,
+        url: shareUrl || window.location.href,
       });
     } else {
-      await navigator.clipboard.writeText(`${shareBody}\n\n${window.location.href}`);
+      await navigator.clipboard.writeText(
+        `${shareBody}\n\n${shareUrl || window.location.href}`
+      );
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     }
   };
 
   const copyLink = async () => {
-    await navigator.clipboard.writeText(`${shareBody}\n\n${window.location.href}`);
+    await navigator.clipboard.writeText(
+      `${shareBody}\n\n${shareUrl || window.location.href}`
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -445,7 +490,11 @@ export default function Home() {
             </p>
           </div>
 
-          <div className={`glass-card founder-card ${rank && rank <= 10000 ? "founder-active" : ""}`}>
+          <div
+            className={`glass-card founder-card${
+              rank && rank <= 10000 ? " founder-active" : ""
+            }${rank && isLegendFounder(rank) ? " legend-founder" : ""}`}
+          >
             <div className="card-shine gold-shine" aria-hidden />
             <h2 className="card-label">{t.founderBadge}</h2>
             {rank ? (
@@ -467,6 +516,14 @@ export default function Home() {
                 <p className="card-hint">{t.joinEarlyToUnlock}</p>
               </div>
             )}
+          </div>
+
+          <div className="glass-card">
+            <div className="card-shine" aria-hidden />
+            <h2 className="card-label">{t.invitedFriends}</h2>
+            <p className="card-stat blue-glow invite-stat">
+              {t.invitedFriendsCount(formatNumber(invitedFriends, locale))}
+            </p>
           </div>
 
           <div className="glass-card">
@@ -505,6 +562,29 @@ export default function Home() {
 
         {/* ── RIGHT: country ranking ── */}
         <aside className="col-right">
+          <div className="glass-card vs-card">
+            <div className="card-shine" aria-hidden />
+            <h2 className="card-label">{t.japanVsWorld}</h2>
+            <div className="vs-rows">
+              <div className="vs-row">
+                <span className="vs-label">{t.japanLabel}</span>
+                <span className="vs-value">
+                  {formatNumber(japanTaps, locale)}
+                </span>
+              </div>
+              <div className="vs-row">
+                <span className="vs-label">{t.worldLabel}</span>
+                <span className="vs-value">
+                  {formatNumber(total, locale)}
+                </span>
+              </div>
+            </div>
+            <div className="vs-bar" role="img" aria-label={`Japan ${Math.round(japanShare)}% of world taps`}>
+              <div className="vs-bar-japan" style={{ width: `${japanShare}%` }} />
+              <div className="vs-bar-world" />
+            </div>
+          </div>
+
           <div className="glass-card leaderboard-card">
             <div className="card-shine" aria-hidden />
             <h2 className="card-label">{t.countryRankingTop10}</h2>

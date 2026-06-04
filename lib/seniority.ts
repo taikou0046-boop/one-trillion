@@ -1,8 +1,13 @@
 export function getSeniorityBadge(joinTapNumber: number): string {
+  if (joinTapNumber <= 10) return "LEGEND FOUNDER";
   if (joinTapNumber <= 100) return "FOUNDER";
   if (joinTapNumber <= 1000) return "PIONEER";
   if (joinTapNumber <= 10000) return "EARLY MEMBER";
   return "CHALLENGER";
+}
+
+export function isLegendFounder(joinTapNumber: number): boolean {
+  return joinTapNumber <= 10;
 }
 
 export function readJoinTapNumber(): number | null {
